@@ -98,8 +98,9 @@ test('weekly habits count completions per week', () => {
 
 test('weekly habit created mid-week gets a fair first target', () => {
   const h = { id: 'w', createdAt: '2026-09-12', schedule: { type: 'weekly', times: 3 } }; // Saturday
-  const r = E.simulate(h, { '2026-09-12': 'full', '2026-09-13': 'full' }, '2026-09-14');
-  assert.equal(r.statuses['2026-09-07'], 'done');
+  const r = E.simulate(h, { '2026-09-12': 'full' }, '2026-09-14');
+  assert.equal(r.statuses['2026-09-12'], 'done'); // 2 days left: 1 of 3 is enough
+  assert.equal(r.streak, 1);
 });
 
 test('bonus drops are deterministic and occasional', () => {
@@ -192,4 +193,62 @@ test('a missed day pauses the journey instead of resetting it', () => {
   const r = E.simulate(daily(), log, E.addDays(START, 19));
   assert.equal(r.streak, 5);
   assert.equal(E.journey(r.fullCount + r.tinyCount).count, 15);
+});
+
+test('editing a schedule does not rewrite the past', () => {
+  // Mon/Wed/Fri for three weeks, then switched to daily.
+  const h = {
+    id: 's', createdAt: '2026-09-07', schedule: { type: 'daily' },
+    pastSchedules: [{ until: '2026-09-27', schedule: { type: 'days', days: [0, 2, 4] } }],
+  };
+  const log = {};
+  for (let d = '2026-09-07'; d <= '2026-09-27'; d = E.addDays(d, 1)) if ([0, 2, 4].includes(E.weekday(d))) log[d] = 'full';
+  log['2026-09-28'] = 'full';
+  const r = E.simulate(h, log, '2026-09-28');
+  assert.equal(r.streak, 10);
+  assert.equal(r.shieldsUsed, 0);
+  assert.equal(E.isScheduled(h, '2026-09-08'), false); // Tuesday under the old schedule
+  assert.equal(E.isScheduled(h, '2026-09-29'), true);
+});
+
+test('switching daily to weekly carries the streak over in weeks', () => {
+  const h = {
+    id: 'x', createdAt: '2026-08-03', schedule: { type: 'weekly', times: 2 },
+    pastSchedules: [{ until: '2026-08-30', schedule: { type: 'daily' } }],
+  };
+  const log = { ...logRange('2026-08-03', 28), '2026-09-01': 'full', '2026-09-03': 'full' };
+  const r = E.simulate(h, log, '2026-09-04');
+  assert.equal(r.unit, 'week');
+  assert.equal(r.streak, 5); // 4 weeks of daily + this week
+  assert.equal(r.bestDays, 35);
+  assert.equal(r.shieldsUsed, 0);
+});
+
+test('current period reports progress toward this week', () => {
+  const h = { id: 'w', createdAt: '2026-09-07', schedule: { type: 'weekly', times: 3 } };
+  const r = E.simulate(h, { '2026-09-14': 'full', '2026-09-15': 'full' }, '2026-09-16');
+  assert.deepEqual(r.current, { key: '2026-09-14', count: 2, target: 3, met: false });
+});
+
+test('normalize keeps valid data and drops anything unsafe', () => {
+  const { state, dropped } = E.normalize({
+    habits: [
+      { id: 'ok', name: ' Read ', createdAt: '2026-09-01', schedule: { type: 'days', days: [4, 0, 0, 9] } },
+      { id: '"><img src=x onerror=alert(1)>', name: 'Evil', createdAt: '2026-09-01', schedule: { type: 'daily' } },
+      { id: 'b', name: 'Bad date', createdAt: '2026-02-31', schedule: { type: 'daily' } },
+      { id: 'c', name: 'Ancient', createdAt: '0001-01-01', schedule: { type: 'daily' } },
+      { id: 'd', name: 'No schedule', createdAt: '2026-09-01' },
+      { id: 'ok', name: 'Duplicate', createdAt: '2026-09-01', schedule: { type: 'daily' } },
+      null,
+    ],
+    logs: { ok: { '2026-09-01': 'full', '2026-09-02': 'yes', nope: 'full' } },
+  });
+  assert.equal(dropped, 6);
+  assert.equal(state.habits.length, 1);
+  assert.equal(state.habits[0].name, 'Read');
+  assert.deepEqual(state.habits[0].schedule, { type: 'days', days: [0, 4] });
+  assert.deepEqual(state.logs.ok, { '2026-09-01': 'full' });
+  assert.throws(() => E.normalize({ foo: 1 }));
+  assert.throws(() => E.normalize(null));
+  assert.deepEqual(E.normalize({ habits: [], logs: null }).state, { habits: [], logs: {} });
 });

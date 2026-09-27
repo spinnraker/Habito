@@ -39,5 +39,6 @@ Every active habit as a strip of days for the month, with a score like "22 of 27
 ## How it works
 
 - `engine.js` is pure logic. XP, streaks, shields, strength and badges are recomputed from the check-in log every time; nothing is stored. Un-checking a day can't corrupt state, and re-checking can't farm rewards: bonus drops come from a hash of habit and date, so they're fixed.
-- `app.js` handles the UI and saves to `localStorage` (`habito:v1`).
+- Editing a habit's schedule applies from today on. Past days are still judged by the schedule that applied then, so an edit can't break an old streak.
+- `app.js` handles the UI and saves to `localStorage` (`habito:v1`). Saved and imported data is validated on load. Anything that can't be read is set aside under a `habito:v1:unreadable:*` key instead of being overwritten.
 - `sw.js` caches the app for offline use. Bump `CACHE` when you ship changes.

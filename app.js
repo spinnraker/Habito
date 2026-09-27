@@ -27,13 +27,18 @@
   // ---------- storage ----------
 
   function load() {
+    let raw = null;
     try {
-      const raw = localStorage.getItem(STORE);
+      raw = localStorage.getItem(STORE);
       if (raw) {
-        const s = JSON.parse(raw);
-        if (Array.isArray(s.habits) && s.logs) return s;
+        const { state: s, dropped } = E.normalize(JSON.parse(raw));
+        if (dropped) localStorage.setItem(`${STORE}:unreadable:${Date.now()}`, raw);
+        return s;
       }
-    } catch (e) { /* fall through to a fresh state */ }
+    } catch (e) {
+      // Unreadable data: keep a copy instead of overwriting it on the next save.
+      try { if (raw) localStorage.setItem(`${STORE}:unreadable:${Date.now()}`, raw); } catch (e2) { /* storage unavailable */ }
+    }
     return { habits: [], logs: {} };
   }
 
@@ -67,11 +72,9 @@
     return s.days.slice().sort().map((d) => DAY_NAMES[d]).join(', ');
   }
 
-  function weekCount(h, t) {
-    const log = state.logs[h.id] || {};
-    let n = 0;
-    for (let d = E.weekStart(t); d <= t; d = E.addDays(d, 1)) if (log[d]) n++;
-    return n;
+  // A habit is finished for today once it's logged, or once a weekly target is met.
+  function doneToday(h, r, t) {
+    return !!logOf(h.id)[t] || (h.schedule.type === 'weekly' && !!r.current && r.current.met);
   }
 
   // ---------- toasts ----------
@@ -80,6 +83,7 @@
   let toasting = false;
 
   function toast(...msgs) {
+    queue.length = 0; // a new action replaces messages still waiting
     queue.push(...msgs);
     if (!toasting) nextToast();
   }
@@ -183,20 +187,48 @@
       d.type === 'days' ? { type: 'days', days: d.days.slice().sort() } :
       { type: 'weekly', times: d.times };
     const fields = { name: d.name.trim(), tiny: d.tiny.trim(), cue: d.cue.trim(), schedule };
+    const t = today();
     if (sheet.id) {
-      Object.assign(habit(sheet.id), fields);
-    } else {
-      state.habits.push({ id: uid(), createdAt: today(), archived: false, ...fields });
+      const h = habit(sheet.id);
+      if (!h) return closeSheet();
+      if (JSON.stringify(h.schedule) !== JSON.stringify(schedule) && h.createdAt < t) {
+        // The new schedule applies from today; past days keep the old one.
+        h.pastSchedules = (h.pastSchedules || []).concat({ until: E.addDays(t, -1), schedule: h.schedule });
+      }
+      Object.assign(h, fields);
+      save();
+      openSheet({ type: 'detail', id: h.id });
+      render();
+      return;
     }
+    state.habits.push({ id: uid(), createdAt: t, archived: false, ...fields });
     save();
     closeSheet();
   }
 
   function exportData() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const json = JSON.stringify(state, null, 2);
+    const name = `habito-${today()}.json`;
+    // Downloads are unreliable in an iPhone home-screen app; the share sheet
+    // lets you save to Files instead.
+    const touch = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+    if (touch && navigator.canShare && typeof File === 'function') {
+      const file = new File([json], name, { type: 'application/json' });
+      if (navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'Habito backup' }).catch((e) => {
+          if (e && e.name !== 'AbortError') download(json, name);
+        });
+        return;
+      }
+    }
+    download(json, name);
+  }
+
+  function download(json, name) {
+    const blob = new Blob([json], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `habito-${today()}.json`;
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -207,15 +239,20 @@
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'application/json,.json';
+    input.hidden = true;
+    document.body.appendChild(input); // some Safari versions ignore detached inputs
     input.onchange = () => {
       const file = input.files[0];
+      input.remove();
       if (!file) return;
       file.text().then((text) => {
-        const s = JSON.parse(text);
-        if (!Array.isArray(s.habits) || typeof s.logs !== 'object') throw new Error('bad file');
-        if (!confirm('Replace all current data with this backup?')) return;
-        state = { habits: s.habits, logs: s.logs };
+        const { state: next, dropped } = E.normalize(JSON.parse(text));
+        if (!next.habits.length && dropped) throw new Error('nothing usable');
+        const note = dropped ? ` ${plural(dropped, 'habit')} in it can’t be read and will be skipped.` : '';
+        if (!confirm(`Replace all current data with this backup?${note}`)) return;
+        state = next;
         save();
+        monthKey = today().slice(0, 7);
         render();
         toast('Backup restored');
       }).catch(() => toast('That file isn’t a Habito backup'));
@@ -265,7 +302,7 @@
 
     const due = habits.filter((h) => E.isScheduled(h, t));
     const rest = habits.filter((h) => !E.isScheduled(h, t));
-    const allDone = due.length && due.every((h) => logOf(h.id)[t]);
+    const allDone = due.length && due.every((h) => doneToday(h, g.perHabit[h.id], t));
 
     let html = head + levelBar(g.level);
     html += `<div class="list">${due.map((h) => row(h, g.perHabit[h.id], t)).join('')}</div>`;
@@ -281,17 +318,17 @@
     const v = logOf(h.id)[t] || '';
     let sub = '';
     let weekMet = false;
-    if (h.schedule.type === 'weekly') {
-      const n = weekCount(h, t);
-      weekMet = n >= h.schedule.times;
-      sub = `${n} of ${h.schedule.times} this week${weekMet ? ' · done' : ''}`;
+    if (h.schedule.type === 'weekly' && r.current) {
+      weekMet = r.current.met;
+      sub = `${r.current.count} of ${r.current.target} this week${weekMet ? ' · done' : ''}`;
     }
 
     let line;
     if (!resting && !v && !weekMet && h.tiny) {
       line = `<button class="tiny-btn" data-action="tiny" data-id="${h.id}">${sub ? esc(sub) + ' · ' : ''}or just: ${esc(h.tiny)}</button>`;
     } else {
-      const text = v === 'tiny' ? 'Tiny version done' : sub || h.cue || scheduleText(h.schedule);
+      const tinyText = sub ? `${sub} · tiny version today` : 'Tiny version done';
+      const text = v === 'tiny' ? tinyText : sub || h.cue || scheduleText(h.schedule);
       line = `<div class="habit-sub">${esc(text)}</div>`;
     }
 
@@ -331,7 +368,8 @@
     const labels = m.days.map((d, i) => {
       const day = i + 1;
       const isToday = d === t;
-      const show = day === 1 || day % 7 === 1 || isToday;
+      const nearToday = d !== t && Math.abs(E.diffDays(d, t)) <= 1;
+      const show = isToday || ((day === 1 || day % 7 === 1) && !nearToday);
       return `<span class="${isToday ? 'is-today' : ''}">${show ? day : ''}</span>`;
     }).join('');
 
@@ -521,7 +559,7 @@
       let cls = '';
       if (d > t || d < h.createdAt || !E.isScheduled(h, d)) cls = 'off';
       else if (log[d]) cls = log[d];
-      else if (r.statuses[d] === 'shielded') cls = 'shielded';
+      else if (r.statuses[d] === 'shielded' && E.scheduleAt(h, d).type !== 'weekly') cls = 'shielded';
       heat += `<i class="${cls}"></i>`;
     }
 
@@ -619,7 +657,8 @@
         render();
         break;
       case 'close':
-        closeSheet();
+        if (sheet && sheet.type === 'form' && sheet.id && habit(sheet.id)) openSheet({ type: 'detail', id: sheet.id });
+        else closeSheet();
         break;
       case 'save':
         saveDraft();

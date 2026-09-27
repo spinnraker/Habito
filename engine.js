@@ -78,31 +78,66 @@
    *   { type: 'weekly', times: 3 }        // any 3 days per week
    * Each is turned into a list of periods with a target count, so streaks and
    * shields work the same way for all of them.
+   *
+   * Editing a schedule must not rewrite the past, so earlier schedules are kept
+   * in `pastSchedules: [{ until, schedule }]` and each date is judged by the
+   * schedule that applied on that date.
    */
-  function periodUnit(habit) {
-    return habit.schedule.type === 'weekly' ? 'week' : 'day';
+  function periodUnit(schedule) {
+    return schedule.type === 'weekly' ? 'week' : 'day';
+  }
+
+  function segments(habit) {
+    const out = [];
+    let from = habit.createdAt;
+    for (const past of habit.pastSchedules || []) {
+      if (past.until < from) continue;
+      out.push({ from, to: past.until, schedule: past.schedule });
+      from = addDays(past.until, 1);
+    }
+    out.push({ from, to: null, schedule: habit.schedule });
+    return out;
+  }
+
+  function scheduleAt(habit, key) {
+    const segs = segments(habit);
+    for (const seg of segs) if (seg.to === null || key <= seg.to) return seg.schedule;
+    return habit.schedule;
+  }
+
+  // A week cut short (habit created mid-week, or schedule changed mid-week)
+  // only asks for its share of the weekly target.
+  function weekTarget(times, days) {
+    if (days >= 7) return times;
+    return Math.max(1, Math.min(times, days, Math.round((times * days) / 7)));
   }
 
   function periods(habit, today) {
-    const s = habit.schedule;
     const out = [];
-    if (s.type === 'weekly') {
-      for (let w = weekStart(habit.createdAt); w <= today; w = addDays(w, 7)) {
-        // A habit created mid-week only has to fit into the days that are left.
-        const daysLeft = 7 - Math.max(0, diffDays(w, habit.createdAt));
-        out.push({ key: w, start: w, end: addDays(w, 6), target: Math.min(s.times, daysLeft) });
-      }
-    } else {
-      for (let d = habit.createdAt; d <= today; d = addDays(d, 1)) {
-        if (s.type === 'days' && !s.days.includes(weekday(d))) continue;
-        out.push({ key: d, start: d, end: d, target: 1 });
+    for (const seg of segments(habit)) {
+      const last = seg.to !== null && seg.to < today ? seg.to : today;
+      if (seg.from > last) continue;
+      const s = seg.schedule;
+      if (s.type === 'weekly') {
+        for (let w = weekStart(seg.from); w <= last; w = addDays(w, 7)) {
+          const start = w < seg.from ? seg.from : w;
+          const weekEnd = addDays(w, 6);
+          const end = seg.to !== null && seg.to < weekEnd ? seg.to : weekEnd;
+          const target = weekTarget(s.times, diffDays(start, end) + 1);
+          out.push({ key: start, start, end, target, unit: 'week' });
+        }
+      } else {
+        for (let d = seg.from; d <= last; d = addDays(d, 1)) {
+          if (s.type === 'days' && !s.days.includes(weekday(d))) continue;
+          out.push({ key: d, start: d, end: d, target: 1, unit: 'day' });
+        }
       }
     }
     return out;
   }
 
   function isScheduled(habit, key) {
-    const s = habit.schedule;
+    const s = scheduleAt(habit, key);
     return s.type !== 'days' || s.days.includes(weekday(key));
   }
 
@@ -132,12 +167,13 @@
    */
   function simulate(habit, log, today) {
     log = log || {};
-    const unit = periodUnit(habit);
-    const alpha = 1 - Math.pow(0.5, 1 / STRENGTH_HALF_LIFE[unit]);
-    const earnEvery = SHIELD.earnEvery[unit];
+    const unit = periodUnit(habit.schedule);
 
     let streak = 0;
     let best = 0;
+    let bestDays = 0;
+    let lastUnit = null;
+    let current = null;
     let shields = SHIELD.start;
     let strength = 0;
     let xp = 0;
@@ -150,6 +186,14 @@
     const events = [];
 
     for (const p of periods(habit, today)) {
+      // Switching between daily and weekly carries the streak over in the new unit.
+      if (lastUnit && p.unit !== lastUnit) {
+        streak = p.unit === 'week' ? Math.ceil(streak / 7) : streak * 7;
+        best = p.unit === 'week' ? Math.ceil(best / 7) : best * 7;
+      }
+      lastUnit = p.unit;
+      const alpha = 1 - Math.pow(0.5, 1 / STRENGTH_HALF_LIFE[p.unit]);
+      const earnEvery = SHIELD.earnEvery[p.unit];
       const inProgress = p.end >= today;
       let count = 0;
       for (let d = p.start; d <= p.end && d <= today; d = addDays(d, 1)) {
@@ -176,6 +220,7 @@
         }
       }
       const met = count >= p.target;
+      if (inProgress) current = { key: p.key, count, target: p.target, met };
 
       if (met) {
         streak++;
@@ -184,8 +229,8 @@
           events.push({ type: 'shield-earned', key: p.key });
         }
         // Milestones are defined in days; weekly habits map weeks to days.
-        const asDays = unit === 'week' ? streak * 7 : streak;
-        const prevDays = unit === 'week' ? (streak - 1) * 7 : streak - 1;
+        const asDays = p.unit === 'week' ? streak * 7 : streak;
+        const prevDays = p.unit === 'week' ? (streak - 1) * 7 : streak - 1;
         for (const m of MILESTONES) {
           if (prevDays < m && asDays >= m) {
             xp += XP.milestone[m];
@@ -210,12 +255,15 @@
         strength += alpha * ((met ? 1 : count / p.target) - strength);
       }
       best = Math.max(best, streak);
+      bestDays = Math.max(bestDays, p.unit === 'week' ? streak * 7 : streak);
     }
 
     return {
       unit,
       streak,
       best,
+      bestDays,
+      current,
       shields,
       shieldsUsed,
       strength: Math.round(strength * 100),
@@ -288,13 +336,85 @@
       agg.tiny += r.tinyCount;
       agg.comebacks += r.comebacks;
       agg.shieldsUsed += r.shieldsUsed;
-      agg.bestDays = Math.max(agg.bestDays, r.unit === 'week' ? r.best * 7 : r.best);
+      agg.bestDays = Math.max(agg.bestDays, r.bestDays);
       if (!h.archived) agg.maxStrength = Math.max(agg.maxStrength, r.strength);
     }
     const lvl = levelInfo(xp);
     agg.level = lvl.level;
     const badges = BADGES.map((b) => ({ id: b.id, name: b.name, desc: b.desc, earned: b.test(agg) }));
     return { perHabit, level: lvl, badges, stats: agg };
+  }
+
+  // ---------- data validation ----------
+
+  const KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+
+  function validKey(k) {
+    return typeof k === 'string' && KEY_RE.test(k) && k >= '2000-01-01' && k <= '2999-12-31' && addDays(k, 0) === k;
+  }
+
+  function cleanSchedule(s) {
+    if (!s || typeof s !== 'object') return null;
+    if (s.type === 'daily') return { type: 'daily' };
+    if (s.type === 'weekly' && Number.isInteger(s.times)) {
+      return { type: 'weekly', times: Math.min(6, Math.max(1, s.times)) };
+    }
+    if (s.type === 'days' && Array.isArray(s.days)) {
+      const days = [...new Set(s.days)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort((a, b) => a - b);
+      if (days.length) return { type: 'days', days };
+    }
+    return null;
+  }
+
+  function cleanText(v, max) {
+    return typeof v === 'string' ? v.trim().slice(0, max) : '';
+  }
+
+  /*
+   * Returns a safe copy of saved or imported data, dropping anything that
+   * doesn't fit. Throws only when the data isn't Habito data at all.
+   */
+  function normalize(data) {
+    if (!data || typeof data !== 'object' || !Array.isArray(data.habits)) throw new Error('Not Habito data');
+    const logsIn = data.logs && typeof data.logs === 'object' ? data.logs : {};
+    const habits = [];
+    const logs = {};
+    let dropped = 0;
+    const ids = new Set();
+
+    for (const h of data.habits) {
+      const schedule = h && cleanSchedule(h.schedule);
+      const name = h && cleanText(h.name, 60);
+      if (!schedule || !name || !ID_RE.test(h.id) || ids.has(h.id) || !validKey(h.createdAt)) {
+        dropped++;
+        continue;
+      }
+      ids.add(h.id);
+      const pastSchedules = (Array.isArray(h.pastSchedules) ? h.pastSchedules : [])
+        .map((p) => p && validKey(p.until) && cleanSchedule(p.schedule) ? { until: p.until, schedule: cleanSchedule(p.schedule) } : null)
+        .filter(Boolean)
+        .sort((a, b) => (a.until < b.until ? -1 : 1));
+      const habit = {
+        id: h.id,
+        name,
+        tiny: cleanText(h.tiny, 60),
+        cue: cleanText(h.cue, 80),
+        schedule,
+        createdAt: h.createdAt,
+        archived: h.archived === true,
+      };
+      if (pastSchedules.length) habit.pastSchedules = pastSchedules;
+      habits.push(habit);
+
+      const src = logsIn[h.id] && typeof logsIn[h.id] === 'object' ? logsIn[h.id] : {};
+      const log = {};
+      for (const [k, v] of Object.entries(src)) {
+        if (validKey(k) && (v === 'full' || v === 'tiny')) log[k] = v;
+      }
+      logs[h.id] = log;
+    }
+    return { state: { habits, logs }, dropped };
   }
 
   // ---------- journey ----------
@@ -347,14 +467,24 @@
       if (h.archived) continue;
       const log = state.logs[h.id] || {};
       const sim = simulate(h, log, today);
-      const weekly = h.schedule.type === 'weekly';
       let done = 0;
-      let eligible = 0;
+      let dayEligible = 0;
+      let weekShare = 0;
+      let anyWeekly = false;
 
       const cells = days.map((d, i) => {
         if (d > today || d < h.createdAt || !isScheduled(h, d)) return 'off';
+        const s = scheduleAt(h, d);
+        const weekly = s.type === 'weekly';
         const v = log[d];
-        if (v || d < today) eligible++;
+        if (v || d < today) {
+          if (weekly) {
+            weekShare += s.times / 7;
+            anyWeekly = true;
+          } else {
+            dayEligible++;
+          }
+        }
         if (!weekly) {
           daily[i].due++;
           if (v) daily[i].done++;
@@ -367,7 +497,7 @@
         return sim.statuses[d] === 'shielded' ? 'shielded' : 'missed';
       });
 
-      const possible = weekly ? Math.max(eligible ? 1 : 0, Math.round((h.schedule.times * eligible) / 7)) : eligible;
+      const possible = dayEligible + (anyWeekly ? Math.max(1, Math.round(weekShare)) : 0);
       const pct = possible ? Math.min(100, Math.round((done / possible) * 100)) : null;
       rows.push({ id: h.id, name: h.name, cells, done, possible, pct });
     }
@@ -398,6 +528,8 @@
     weekStart,
     periods,
     isScheduled,
+    scheduleAt,
+    normalize,
     bonusDrop,
     simulate,
     xpForLevel,

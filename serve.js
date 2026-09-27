@@ -16,9 +16,16 @@ const types = {
 };
 
 http.createServer((req, res) => {
-  const url = decodeURIComponent(req.url.split('?')[0]);
+  let url;
+  try {
+    url = decodeURIComponent(req.url.split('?')[0]);
+  } catch (e) {
+    res.writeHead(400).end('Bad request');
+    return;
+  }
   const file = path.join(root, url.endsWith('/') ? url + 'index.html' : url);
-  if (!file.startsWith(root + path.sep)) {
+  const hidden = path.relative(root, file).split(path.sep).some((part) => part.startsWith('.'));
+  if (!file.startsWith(root + path.sep) || hidden) {
     res.writeHead(403).end();
     return;
   }
