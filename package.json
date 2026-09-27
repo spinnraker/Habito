@@ -1,0 +1,10 @@
+{
+  "name": "habito",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A minimalist habit tracker that uses game mechanics designed to stick.",
+  "scripts": {
+    "start": "node serve.js",
+    "test": "node --test test/*.test.js"
+  }
+}
