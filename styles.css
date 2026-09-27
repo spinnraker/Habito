@@ -250,11 +250,11 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
   display: grid;
   grid-auto-flow: column;
   grid-template-rows: repeat(7, auto);
-  grid-template-columns: repeat(20, 1fr);
-  gap: 3px;
+  gap: 2px;
+  grid-template-columns: repeat(var(--cols, 20), 1fr);
   margin-top: 12px;
 }
-.heat i { aspect-ratio: 1; background: var(--faint); border-radius: 2px; }
+.heat i { aspect-ratio: 1; background: var(--faint); border-radius: 1.5px; }
 .heat i.full { background: var(--fg); }
 .heat i.tiny { background: var(--muted); }
 .heat i.shielded { box-shadow: inset 0 0 0 1.5px var(--muted); background: transparent; }
@@ -343,3 +343,14 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 .mbars i { height: 32px; display: flex; align-items: flex-end; }
 .mbars i.due { box-shadow: inset 0 -1px 0 var(--line); }
 .mbars b { display: block; width: 100%; background: var(--fg); border-radius: 1px; }
+
+/* ---------- journey ---------- */
+
+.journey { margin-top: 12px; }
+.journey-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.journey-text b { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.journey-text span { color: var(--muted); }
+.journey-left { flex: none; font-size: 14px; color: var(--muted); }
+.journey .bar { margin-top: 10px; }
+.journey-steps { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.journey-steps .reached { color: var(--fg); font-weight: 600; }

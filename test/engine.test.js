@@ -177,3 +177,19 @@ test('month overview skips archived habits and empty months', () => {
   assert.equal(m.rows.length, 0);
   assert.equal(m.pct, null);
 });
+
+test('journey counts check-ins toward 66, then 100, then 365', () => {
+  assert.deepEqual(E.journey(0), { count: 0, goal: 66, prev: 0, pct: 0 });
+  assert.equal(E.journey(33).pct, 50);
+  assert.equal(E.journey(66).goal, 100);
+  assert.equal(E.journey(99).goal, 100);
+  assert.equal(E.journey(100).goal, 365);
+  assert.deepEqual(E.journey(400), { count: 400, goal: null, prev: 365, pct: 100 });
+});
+
+test('a missed day pauses the journey instead of resetting it', () => {
+  const log = { ...logRange(START, 10), ...logRange(E.addDays(START, 15), 5) };
+  const r = E.simulate(daily(), log, E.addDays(START, 19));
+  assert.equal(r.streak, 5);
+  assert.equal(E.journey(r.fullCount + r.tinyCount).count, 15);
+});

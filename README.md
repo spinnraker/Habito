@@ -28,6 +28,10 @@ Most streak apps fail the same way: one missed day wipes out weeks of progress, 
 
 Milestones at 7, 21, 30, 66, 100 and 365 days pay XP. Levels need progressively more XP.
 
+## Journey
+
+Each habit shows how many check-ins it has toward 66 (the median time to become automatic), then 100, then 365. It counts check-ins, not the streak, so a missed day pauses the journey instead of resetting it. The history grid in each habit's detail covers up to a year, growing from the week you started.
+
 ## Month view
 
 Every active habit as a strip of days for the month, with a score like "22 of 27 · 81%", plus a bar per day showing how much of that day's plan you finished. Today only counts once it's done, so an unfinished day never drags the number down. Weekly habits are scored against their weekly target and never show a day as missed.

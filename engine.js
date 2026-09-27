@@ -30,6 +30,9 @@
   // Strength halves after this many missed periods (days or weeks).
   const STRENGTH_HALF_LIFE = { day: 14, week: 3 };
   const MILESTONES = [7, 21, 30, 66, 100, 365];
+  // Check-in goals per habit. 66 is the median time for a habit to become
+  // automatic (Lally et al., 2010); the others are stretch goals.
+  const JOURNEY = [66, 100, 365];
 
   // ---------- date keys (YYYY-MM-DD, calendar dates, DST-safe) ----------
 
@@ -294,6 +297,19 @@
     return { perHabit, level: lvl, badges, stats: agg };
   }
 
+  // ---------- journey ----------
+
+  /*
+   * Progress toward the next check-in goal. Counts check-ins, not the streak,
+   * so a missed day pauses the journey instead of resetting it.
+   */
+  function journey(count) {
+    const i = JOURNEY.findIndex((g) => count < g);
+    if (i === -1) return { count, goal: null, prev: JOURNEY[JOURNEY.length - 1], pct: 100 };
+    const goal = JOURNEY[i];
+    return { count, goal, prev: i ? JOURNEY[i - 1] : 0, pct: Math.floor((count / goal) * 100) };
+  }
+
   // ---------- month overview ----------
 
   function monthDays(monthKey) {
@@ -374,6 +390,7 @@
     XP,
     SHIELD,
     MILESTONES,
+    JOURNEY,
     toKey,
     addDays,
     diffDays,
@@ -389,5 +406,6 @@
     monthDays,
     shiftMonth,
     month,
+    journey,
   };
 });

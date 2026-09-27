@@ -7,6 +7,12 @@
   const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const TICK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   const SOFT_LIMIT = 3;
+  const HISTORY_WEEKS = 52;
+  const JOURNEY_TEXT = {
+    66: { to: 'until it’s automatic', reached: 'It’s automatic now' },
+    100: { to: 'to 100', reached: 'Triple digits' },
+    365: { to: 'to a full year', reached: 'A full year' },
+  };
 
   const app = document.getElementById('app');
   const sheetEl = document.getElementById('sheet');
@@ -116,6 +122,19 @@
       if (e.type === 'comeback') msgs.push('Welcome back · +' + e.xp);
       if (e.type === 'shield-earned') msgs.push('Shield earned');
       if (e.type === 'milestone') msgs.push(`${e.days}-day milestone · +${e.xp}`);
+    }
+    const b = before.perHabit[id];
+    const a = after.perHabit[id];
+    const was = b.fullCount + b.tinyCount;
+    const now = a.fullCount + a.tinyCount;
+    for (const goal of E.JOURNEY) {
+      if (was < goal && now >= goal) {
+        // A streak milestone for the same number already fired: say it once.
+        const i = msgs.findIndex((m) => m.startsWith(`${goal}-day milestone`));
+        const text = `${goal} check-ins · ${JOURNEY_TEXT[goal].reached}`;
+        if (i === -1) msgs.push(text);
+        else msgs[i] = `${JOURNEY_TEXT[goal].reached} · ${msgs[i].split(' · ')[1]}`;
+      }
     }
     if (after.level.level > before.level.level) msgs.push(`Level ${after.level.level} · ${after.level.title}`);
     after.badges.forEach((b, i) => {
@@ -458,6 +477,20 @@
       ${tooMany ? `<p class="warn">You already have ${active().length} habits. New habits stick best one or two at a time. Consider adding this once the others feel automatic.</p>` : ''}`;
   }
 
+  function journeyBlock(j) {
+    const text = j.goal
+      ? `<b>${j.count}</b> of ${j.goal} check-ins <span>${JOURNEY_TEXT[j.goal].to}</span>`
+      : `<b>${j.count}</b> check-ins <span>more than a year of practice</span>`;
+    const left = j.goal ? `${j.goal - j.count} to go` : 'Complete';
+    return `<div class="section-label">Journey</div>
+      <div class="journey">
+        <div class="journey-row"><span class="journey-text">${text}</span><span class="journey-left">${left}</span></div>
+        <div class="bar"><i style="width:${j.pct}%"></i></div>
+        <div class="journey-steps">${E.JOURNEY.map((g) =>
+          `<span class="${j.count >= g ? 'reached' : ''}">${g}</span>`).join('')}</div>
+      </div>`;
+  }
+
   function detailView() {
     const h = habit(sheet.id);
     if (!h) return '';
@@ -478,8 +511,11 @@
       </div>`;
     }
 
-    // Up to 20 weeks of history, starting from the week the habit was created.
-    const start = [E.addDays(E.weekStart(t), -7 * 19), E.weekStart(h.createdAt)].sort()[1];
+    // Up to a year of history, starting from the week the habit was created.
+    // Columns stay at least 20 wide so a new habit's grid isn't stretched.
+    const start = [E.addDays(E.weekStart(t), -7 * (HISTORY_WEEKS - 1)), E.weekStart(h.createdAt)].sort()[1];
+    const weeks = E.diffDays(start, E.weekStart(t)) / 7 + 1;
+    const since = new Date(`${start}T12:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
     let heat = '';
     for (let d = start; d <= E.addDays(E.weekStart(t), 6); d = E.addDays(d, 1)) {
       let cls = '';
@@ -505,12 +541,14 @@
         <div class="stat"><b>${r.shields}</b><small>Shields</small></div>
       </div>
 
+      ${journeyBlock(E.journey(r.fullCount + r.tinyCount))}
+
       <div class="section-label">Last 7 days</div>
       <div class="week-edit">${week}</div>
       <p class="hint">Tap to cycle: done, tiny, not done.</p>
 
-      <div class="section-label">History</div>
-      <div class="heat">${heat}</div>
+      <div class="section-label">${weeks >= HISTORY_WEEKS ? 'Past year' : `Since ${esc(since)}`}</div>
+      <div class="heat" style="--cols:${Math.max(20, weeks)}">${heat}</div>
       <div class="legend">
         <span><i style="background:var(--fg)"></i>Done</span>
         <span><i style="background:var(--muted)"></i>Tiny</span>
