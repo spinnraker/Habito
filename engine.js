@@ -294,6 +294,82 @@
     return { perHabit, level: lvl, badges, stats: agg };
   }
 
+  // ---------- month overview ----------
+
+  function monthDays(monthKey) {
+    const first = `${monthKey}-01`;
+    const out = [];
+    for (let d = first; d.slice(0, 7) === monthKey; d = addDays(d, 1)) out.push(d);
+    return out;
+  }
+
+  function shiftMonth(monthKey, n) {
+    let [y, m] = monthKey.split('-').map(Number);
+    m += n;
+    y += Math.floor((m - 1) / 12);
+    m = ((m - 1) % 12 + 12) % 12 + 1;
+    return `${y}-${String(m).padStart(2, '0')}`;
+  }
+
+  /*
+   * One month of check-ins for every active habit, plus how many of each
+   * day's habits were done. Cell states:
+   *   full | tiny     logged
+   *   shielded        missed, but a shield covered it
+   *   missed          missed a day that was due
+   *   open            no check-in on a day that wasn't strictly due (weekly habits, today)
+   *   off             before the habit existed, in the future, or not scheduled
+   * Today only counts toward the score once it's done, so an unfinished day
+   * never lowers the percentage.
+   */
+  function month(state, monthKey, today) {
+    const days = monthDays(monthKey);
+    const rows = [];
+    const daily = days.map((key) => ({ key, due: 0, done: 0 }));
+
+    for (const h of state.habits) {
+      if (h.archived) continue;
+      const log = state.logs[h.id] || {};
+      const sim = simulate(h, log, today);
+      const weekly = h.schedule.type === 'weekly';
+      let done = 0;
+      let eligible = 0;
+
+      const cells = days.map((d, i) => {
+        if (d > today || d < h.createdAt || !isScheduled(h, d)) return 'off';
+        const v = log[d];
+        if (v || d < today) eligible++;
+        if (!weekly) {
+          daily[i].due++;
+          if (v) daily[i].done++;
+        }
+        if (v) {
+          done++;
+          return v;
+        }
+        if (weekly || d === today) return 'open';
+        return sim.statuses[d] === 'shielded' ? 'shielded' : 'missed';
+      });
+
+      const possible = weekly ? Math.max(eligible ? 1 : 0, Math.round((h.schedule.times * eligible) / 7)) : eligible;
+      const pct = possible ? Math.min(100, Math.round((done / possible) * 100)) : null;
+      rows.push({ id: h.id, name: h.name, cells, done, possible, pct });
+    }
+
+    const totalDone = rows.reduce((n, r) => n + Math.min(r.done, r.possible), 0);
+    const totalPossible = rows.reduce((n, r) => n + r.possible, 0);
+    const perfect = daily.filter((d) => d.due > 0 && d.done === d.due).length;
+
+    return {
+      key: monthKey,
+      days,
+      rows,
+      daily,
+      perfect,
+      pct: totalPossible ? Math.round((totalDone / totalPossible) * 100) : null,
+    };
+  }
+
   return {
     XP,
     SHIELD,
@@ -310,5 +386,8 @@
     xpForLevel,
     levelInfo,
     game,
+    monthDays,
+    shiftMonth,
+    month,
   };
 });

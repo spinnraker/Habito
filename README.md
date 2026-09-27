@@ -28,6 +28,10 @@ Most streak apps fail the same way: one missed day wipes out weeks of progress, 
 
 Milestones at 7, 21, 30, 66, 100 and 365 days pay XP. Levels need progressively more XP.
 
+## Month view
+
+Every active habit as a strip of days for the month, with a score like "22 of 27 · 81%", plus a bar per day showing how much of that day's plan you finished. Today only counts once it's done, so an unfinished day never drags the number down. Weekly habits are scored against their weekly target and never show a day as missed.
+
 ## How it works
 
 - `engine.js` is pure logic. XP, streaks, shields, strength and badges are recomputed from the check-in log every time; nothing is stored. Un-checking a day can't corrupt state, and re-checking can't farm rewards: bonus drops come from a hash of habit and date, so they're fixed.

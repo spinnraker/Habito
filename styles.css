@@ -310,3 +310,36 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- month ---------- */
+
+.month-head { display: flex; align-items: flex-end; justify-content: space-between; }
+.month-nav { display: flex; gap: 4px; margin-right: -10px; }
+.month-nav button { width: 44px; height: 44px; font-size: 30px; font-weight: 300; line-height: 1; }
+.month-nav button:disabled { color: var(--line); cursor: default; }
+
+.stats.three { grid-template-columns: repeat(3, 1fr); }
+
+.month { margin-top: 28px; }
+.mlabels, .mcells, .mbars { display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 2px; }
+.mlabels span { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: visible; }
+.mlabels span.is-today { color: var(--fg); font-weight: 700; }
+
+.mrow { display: block; width: 100%; text-align: left; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.mlabels + .mrow { margin-top: 6px; border-top: 1px solid var(--line); }
+.mrow-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.mrow-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow-score { flex: none; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.mcells i { height: 18px; border-radius: 2px; }
+.mcells i.full { background: var(--fg); }
+.mcells i.tiny { background: var(--muted); }
+.mcells i.missed { background: var(--line); }
+.mcells i.open { background: var(--faint); }
+.mcells i.shielded { box-shadow: inset 0 0 0 1.5px var(--muted); }
+.mcells i.today:not(.full):not(.tiny) { box-shadow: inset 0 0 0 1.5px var(--fg); }
+
+.mrow.daily { border-bottom: 0; }
+.mbars i { height: 32px; display: flex; align-items: flex-end; }
+.mbars i.due { box-shadow: inset 0 -1px 0 var(--line); }
+.mbars b { display: block; width: 100%; background: var(--fg); border-radius: 1px; }

@@ -14,6 +14,7 @@
 
   let state = load();
   let view = 'today';
+  let monthKey = today().slice(0, 7);
   let sheet = null; // { type: 'form', draft, id } | { type: 'detail', id }
   let lastToday = today();
 
@@ -208,14 +209,15 @@
   function render() {
     const t = today();
     const g = E.game(state, t);
-    app.innerHTML = top() + (view === 'today' ? todayView(g, t) : progressView(g));
+    const body = view === 'today' ? todayView(g, t) : view === 'month' ? monthView(t) : progressView(g);
+    app.innerHTML = top() + body;
   }
 
   function top() {
     const tab = (id, label) =>
       `<button class="tab" data-action="view" data-view="${id}" ${view === id ? 'aria-current="page"' : ''}>${label}</button>`;
     return `<header class="top">
-      <nav class="tabs">${tab('today', 'Today')}${tab('progress', 'Progress')}</nav>
+      <nav class="tabs">${tab('today', 'Today')}${tab('month', 'Month')}${tab('progress', 'Progress')}</nav>
       <button class="icon-btn" data-action="new" aria-label="New habit">+</button>
     </header>`;
   }
@@ -289,6 +291,78 @@
         <span class="shields">${'<i></i>'.repeat(r.shields)}</span>
       </button>
     </div>`;
+  }
+
+  function monthView(t) {
+    const habits = active();
+    if (!habits.length) {
+      return `<div class="empty"><p>Your month fills in as you check in.</p>
+        <button class="btn" data-action="new">New habit</button></div>`;
+    }
+
+    const m = E.month(state, monthKey, t);
+    const first = state.habits.reduce((min, h) => (h.createdAt < min ? h.createdAt : min), t).slice(0, 7);
+    const current = t.slice(0, 7);
+    const date = new Date(`${monthKey}-01T12:00:00`);
+    const name = date.toLocaleDateString(undefined, { month: 'long' });
+    const year = date.getFullYear();
+    const n = m.days.length;
+    const checkins = m.rows.reduce((sum, r) => sum + r.done, 0);
+
+    const labels = m.days.map((d, i) => {
+      const day = i + 1;
+      const isToday = d === t;
+      const show = day === 1 || day % 7 === 1 || isToday;
+      return `<span class="${isToday ? 'is-today' : ''}">${show ? day : ''}</span>`;
+    }).join('');
+
+    const rows = m.rows.map((r) => `
+      <button class="mrow" data-action="detail" data-id="${r.id}">
+        <span class="mrow-head">
+          <span class="mrow-name">${esc(r.name)}</span>
+          <span class="mrow-score">${r.pct === null ? '–' : `${r.done} of ${r.possible} · ${r.pct}%`}</span>
+        </span>
+        <span class="mcells">${r.cells.map((c, i) =>
+          `<i class="${c}${m.days[i] === t ? ' today' : ''}"></i>`).join('')}</span>
+      </button>`).join('');
+
+    const bars = m.daily.map((d) => {
+      if (!d.due || d.key > t) return '<i></i>';
+      const pct = Math.round((d.done / d.due) * 100);
+      return `<i class="due" title="${d.done} of ${d.due}"><b style="height:${pct}%"></b></i>`;
+    }).join('');
+
+    return `
+      <div class="date">${year}</div>
+      <div class="month-head">
+        <h1>${esc(name)}</h1>
+        <div class="month-nav">
+          <button data-action="month" data-delta="-1" ${monthKey <= first ? 'disabled' : ''} aria-label="Previous month">‹</button>
+          <button data-action="month" data-delta="1" ${monthKey >= current ? 'disabled' : ''} aria-label="Next month">›</button>
+        </div>
+      </div>
+
+      <div class="stats three">
+        <div class="stat"><b>${m.pct === null ? '–' : m.pct + '%'}</b><small>Completed</small></div>
+        <div class="stat"><b>${m.perfect}</b><small>Perfect days</small></div>
+        <div class="stat"><b>${checkins}</b><small>Check-ins</small></div>
+      </div>
+
+      <div class="month" style="--n:${n}">
+        <div class="mlabels" aria-hidden="true">${labels}</div>
+        ${rows}
+        <div class="mrow daily">
+          <span class="mrow-head"><span class="mrow-name">Each day</span><span class="mrow-score">Share of habits done</span></span>
+          <span class="mbars">${bars}</span>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><i style="background:var(--fg)"></i>Done</span>
+        <span><i style="background:var(--muted)"></i>Tiny</span>
+        <span><i style="box-shadow:inset 0 0 0 1.5px var(--muted)"></i>Shielded</span>
+        <span><i style="background:var(--line)"></i>Missed</span>
+      </div>`;
   }
 
   function progressView(g) {
@@ -462,6 +536,10 @@
         view = el.dataset.view;
         render();
         window.scrollTo(0, 0);
+        break;
+      case 'month':
+        monthKey = E.shiftMonth(monthKey, Number(el.dataset.delta));
+        render();
         break;
       case 'new':
         openSheet({ type: 'form', draft: newDraft(), id: null });

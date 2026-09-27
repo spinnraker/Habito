@@ -132,3 +132,48 @@ test('game aggregates habits and badges', () => {
   assert.ok(g.badges.find((b) => b.id === 'week').earned);
   assert.ok(!g.badges.find((b) => b.id === 'month').earned);
 });
+
+test('month helpers handle lengths and year boundaries', () => {
+  assert.equal(E.monthDays('2026-02').length, 28);
+  assert.equal(E.monthDays('2028-02').length, 29);
+  assert.equal(E.monthDays('2026-09').at(-1), '2026-09-30');
+  assert.equal(E.shiftMonth('2026-01', -1), '2025-12');
+  assert.equal(E.shiftMonth('2026-12', 1), '2027-01');
+});
+
+test('month overview scores each habit without penalising today', () => {
+  const h = { id: 'a', createdAt: '2026-09-10', schedule: { type: 'daily' } };
+  const log = { ...logRange('2026-09-10', 5), '2026-09-17': 'tiny' }; // 10–14, 17
+  const m = E.month({ habits: [h], logs: { a: log } }, '2026-09', '2026-09-18');
+  const row = m.rows[0];
+  const cell = (d) => row.cells[d - 1];
+  assert.equal(cell(9), 'off'); // before creation
+  assert.equal(cell(10), 'full');
+  assert.equal(cell(15), 'shielded'); // starting shield
+  assert.equal(cell(16), 'missed');
+  assert.equal(cell(17), 'tiny');
+  assert.equal(cell(18), 'open'); // today, not done yet
+  assert.equal(cell(19), 'off'); // future
+  assert.equal(row.done, 6);
+  assert.equal(row.possible, 8); // 10th–17th; today excluded until done
+  assert.equal(row.pct, 75);
+  assert.equal(m.perfect, 6);
+});
+
+test('month overview: weekly habits have no daily misses', () => {
+  const h = { id: 'w', createdAt: '2026-09-01', schedule: { type: 'weekly', times: 2 } };
+  const log = { '2026-09-01': 'full', '2026-09-03': 'full', '2026-09-08': 'full' };
+  const m = E.month({ habits: [h], logs: { w: log } }, '2026-09', '2026-09-14');
+  const row = m.rows[0];
+  assert.ok(!row.cells.includes('missed'));
+  assert.equal(row.possible, 4); // 2 a week over 13 elapsed days
+  assert.equal(row.pct, 75);
+  assert.equal(m.daily[0].due, 0); // weekly habits don't make a day "due"
+});
+
+test('month overview skips archived habits and empty months', () => {
+  const h = { id: 'a', createdAt: '2026-09-01', schedule: { type: 'daily' }, archived: true };
+  const m = E.month({ habits: [h], logs: {} }, '2026-09', '2026-09-10');
+  assert.equal(m.rows.length, 0);
+  assert.equal(m.pct, null);
+});
