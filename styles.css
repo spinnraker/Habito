@@ -1,7 +1,7 @@
 :root {
   --bg: #ffffff;
   --fg: #000000;
-  --muted: #8e8e93;
+  --muted: #6e6e73;
   --line: #e5e5ea;
   --faint: #f2f2f7;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -97,7 +97,8 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
-.habit.rest { opacity: .35; }
+.habit.rest .habit-name,
+.habit.rest .streak b { color: var(--muted); }
 
 .check {
   flex: none;
@@ -128,17 +129,17 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 }
 
 .habit-body { flex: 1; min-width: 0; text-align: left; padding: 4px 0; }
-.habit-name { display: block; max-width: 100%; text-align: left; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.habit-name { display: block; max-width: 100%; padding: 2px 0; text-align: left; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .habit-sub { font-size: 14px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tiny-btn {
   font-size: 14px;
   color: var(--muted);
-  padding: 2px 0;
-  margin-top: 1px;
+  padding: 4px 0;
+  margin: 0 0 -4px;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: var(--line);
+  text-decoration-color: var(--muted);
   max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   display: block;
@@ -193,7 +194,7 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 .sheet-top .done:disabled { color: var(--muted); }
 
 .field { display: block; margin-top: 28px; }
-.field > span { display: block; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.field > span, .field > label { display: block; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .field input[type="text"] {
   width: 100%;
   font-size: 22px;
@@ -202,7 +203,7 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
   border-radius: 0;
 }
 .field input[type="text"]:focus { border-bottom-color: var(--fg); outline: none; }
-.field input::placeholder { color: var(--line); }
+.field input::placeholder { color: var(--muted); opacity: 1; }
 .hint { font-size: 14px; color: var(--muted); margin-top: 8px; }
 
 .seg { display: flex; margin-top: 12px; border: 1.5px solid var(--fg); border-radius: 10px; overflow: hidden; }
@@ -259,6 +260,7 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 .heat i.tiny { background: var(--muted); }
 .heat i.shielded { box-shadow: inset 0 0 0 1.5px var(--muted); background: transparent; }
 .heat i.off { background: transparent; }
+.heat i.missed { background: linear-gradient(to top, var(--muted) 30%, var(--faint) 30%); }
 .legend { display: flex; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--muted); align-items: center; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
@@ -334,14 +336,14 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 .mcells i { height: 18px; border-radius: 2px; }
 .mcells i.full { background: var(--fg); }
 .mcells i.tiny { background: var(--muted); }
-.mcells i.missed { background: var(--line); }
+.mcells i.missed { background: linear-gradient(to top, var(--muted) 5px, var(--faint) 5px); }
 .mcells i.open { background: var(--faint); }
 .mcells i.shielded { box-shadow: inset 0 0 0 1.5px var(--muted); }
 .mcells i.today:not(.full):not(.tiny) { box-shadow: inset 0 0 0 1.5px var(--fg); }
 
 .mrow.daily { border-bottom: 0; }
 .mbars i { height: 32px; display: flex; align-items: flex-end; }
-.mbars i.due { box-shadow: inset 0 -1px 0 var(--line); }
+.mbars i.due { box-shadow: inset 0 -2px 0 var(--muted); }
 .mbars b { display: block; width: 100%; background: var(--fg); border-radius: 1px; }
 
 /* ---------- journey ---------- */
@@ -354,3 +356,14 @@ h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1
 .journey .bar { margin-top: 10px; }
 .journey-steps { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .journey-steps .reached { color: var(--fg); font-weight: 600; }
+
+/* ---------- accessibility ---------- */
+
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap; border: 0;
+}
+[tabindex="-1"]:focus { outline: none; }

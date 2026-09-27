@@ -77,6 +77,54 @@
     return !!logOf(h.id)[t] || (h.schedule.type === 'weekly' && !!r.current && r.current.met);
   }
 
+  function longDate(key) {
+    return new Date(`${key}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
+  function progressBar(pct, label) {
+    return `<div class="bar" role="progressbar" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><i style="width:${pct}%"></i></div>`;
+  }
+
+  // Shown for sighted users; screen readers get the same facts as text.
+  function legend(withMissed) {
+    return `<div class="legend" aria-hidden="true">
+        <span><i style="background:var(--fg)"></i>Done</span>
+        <span><i style="background:var(--muted)"></i>Tiny</span>
+        <span><i style="box-shadow:inset 0 0 0 1.5px var(--muted)"></i>Shielded</span>
+        ${withMissed ? '<span><i style="background:linear-gradient(to top, var(--muted) 30%, var(--faint) 30%)"></i>Missed</span>' : ''}
+      </div>`;
+  }
+
+  function tally(cells) {
+    const n = (c) => cells.filter((x) => x === c).length;
+    const parts = [[n('full'), 'done'], [n('tiny'), 'tiny'], [n('shielded'), 'shielded'], [n('missed'), 'missed']]
+      .filter(([k]) => k > 0).map(([k, w]) => `${k} ${w}`);
+    return parts.length ? parts.join(', ') : 'no check-ins yet';
+  }
+
+  // Re-rendering replaces the DOM; put focus back on the same control so
+  // keyboard and VoiceOver users don't get thrown to the top of the page.
+  const FOCUS_KEYS = ['action', 'id', 'key', 'view', 'type', 'day', 'delta', 'field'];
+  function focusKey() {
+    const el = document.activeElement;
+    if (!el || el === document.body || !el.dataset) return null;
+    const sel = FOCUS_KEYS.filter((k) => el.dataset[k] !== undefined)
+      .map((k) => `[data-${k}="${CSS.escape(el.dataset[k])}"]`).join('');
+    return sel || null;
+  }
+  function refocus(root, sel) {
+    if (!sel) return;
+    // If that exact control is gone (e.g. the tiny link after using it),
+    // fall back to the same habit's check button, then anything for that habit.
+    const id = /\[data-id="([^"]*)"\]/.exec(sel);
+    const tries = [sel];
+    if (id) tries.push(`[data-action="check"][data-id="${id[1]}"]`, `[data-id="${id[1]}"]`);
+    for (const t of tries) {
+      const el = root.querySelector(t);
+      if (el && !el.disabled) { el.focus({ preventScroll: true }); return; }
+    }
+  }
+
   // ---------- toasts ----------
 
   const queue = [];
@@ -149,18 +197,29 @@
 
   function cycle(v) { return !v ? 'full' : v === 'full' ? 'tiny' : null; }
 
+  let opener = null; // control that opened the sheet, to return focus to
+
   function openSheet(s) {
+    if (!sheet) opener = focusKey();
     sheet = s;
     document.body.style.overflow = 'hidden';
+    app.inert = true;
+    app.setAttribute('aria-hidden', 'true');
     renderSheet();
     sheetEl.scrollTop = 0;
+    const title = sheetEl.querySelector('#sheet-title');
+    if (title) title.focus({ preventScroll: true });
   }
 
   function closeSheet() {
     sheet = null;
     document.body.style.overflow = '';
+    app.inert = false;
+    app.removeAttribute('aria-hidden');
     renderSheet();
     render();
+    refocus(app, opener);
+    opener = null;
   }
 
   function newDraft(h) {
@@ -266,23 +325,26 @@
     const t = today();
     const g = E.game(state, t);
     const body = view === 'today' ? todayView(g, t) : view === 'month' ? monthView(t) : progressView(g);
+    const keep = sheet ? null : focusKey();
     app.innerHTML = top() + body;
+    refocus(app, keep);
   }
 
   function top() {
     const tab = (id, label) =>
       `<button class="tab" data-action="view" data-view="${id}" ${view === id ? 'aria-current="page"' : ''}>${label}</button>`;
     return `<header class="top">
-      <nav class="tabs">${tab('today', 'Today')}${tab('month', 'Month')}${tab('progress', 'Progress')}</nav>
+      <nav class="tabs" aria-label="Sections">${tab('today', 'Today')}${tab('month', 'Month')}${tab('progress', 'Progress')}</nav>
       <button class="icon-btn" data-action="new" aria-label="New habit">+</button>
     </header>`;
   }
 
   function levelBar(l) {
     const pct = Math.round((l.into / l.needed) * 100);
-    return `<button class="level" data-action="view" data-view="progress">
-      <div class="level-row"><span>Level ${l.level} · ${l.title}</span><span>${l.into} / ${l.needed} XP</span></div>
-      <div class="bar"><i style="width:${pct}%"></i></div>
+    const label = `Level ${l.level}, ${l.title}. ${l.into} of ${l.needed} XP to level ${l.level + 1}. Open progress`;
+    return `<button class="level" data-action="view" data-view="progress" aria-label="${label}">
+      <div class="level-row" aria-hidden="true"><span>Level ${l.level} · ${l.title}</span><span>${l.into} / ${l.needed} XP</span></div>
+      <div class="bar" aria-hidden="true"><i style="width:${pct}%"></i></div>
     </button>`;
   }
 
@@ -308,10 +370,16 @@
     html += `<div class="list">${due.map((h) => row(h, g.perHabit[h.id], t)).join('')}</div>`;
     if (allDone) html += `<p class="all-done">That’s everything. See you tomorrow.</p>`;
     if (rest.length) {
-      html += `<div class="section-label">Rest day</div>
+      html += `<h2 class="section-label">Rest day</h2>
         <div class="list">${rest.map((h) => row(h, g.perHabit[h.id], t, true)).join('')}</div>`;
     }
     return html;
+  }
+
+  function checkLabel(name, v) {
+    if (v === 'full') return `${name}: done. Tap to undo`;
+    if (v === 'tiny') return `${name}: tiny version done. Tap to mark fully done`;
+    return `Mark ${name} done`;
   }
 
   function row(h, r, t, resting) {
@@ -334,7 +402,7 @@
 
     const unit = r.unit === 'week' ? (r.streak === 1 ? 'week' : 'weeks') : (r.streak === 1 ? 'day' : 'days');
     const check = resting ? '' :
-      `<button class="check" data-action="check" data-id="${h.id}" data-v="${v}" aria-label="${v ? 'Undo' : 'Done'}: ${esc(h.name)}">${TICK}</button>`;
+      `<button class="check" data-action="check" data-id="${h.id}" data-v="${v}" aria-label="${esc(checkLabel(h.name, v))}">${TICK}</button>`;
 
     return `<div class="habit${resting ? ' rest' : ''}">
       ${check}
@@ -374,12 +442,13 @@
     }).join('');
 
     const rows = m.rows.map((r) => `
-      <button class="mrow" data-action="detail" data-id="${r.id}">
-        <span class="mrow-head">
+      <button class="mrow" data-action="detail" data-id="${r.id}"
+        aria-label="${esc(r.name)}: ${r.pct === null ? 'nothing due yet' : r.done > r.possible ? `${plural(r.done, 'check-in')}, ${r.pct} percent` : `${r.done} of ${r.possible}, ${r.pct} percent`}. ${tally(r.cells)}. Open habit">
+        <span class="mrow-head" aria-hidden="true">
           <span class="mrow-name">${esc(r.name)}</span>
-          <span class="mrow-score">${r.pct === null ? '–' : `${r.done} of ${r.possible} · ${r.pct}%`}</span>
+          <span class="mrow-score">${r.pct === null ? '–' : r.done > r.possible ? `${plural(r.done, 'check-in')} · ${r.pct}%` : `${r.done} of ${r.possible} · ${r.pct}%`}</span>
         </span>
-        <span class="mcells">${r.cells.map((c, i) =>
+        <span class="mcells" aria-hidden="true">${r.cells.map((c, i) =>
           `<i class="${c}${m.days[i] === t ? ' today' : ''}"></i>`).join('')}</span>
       </button>`).join('');
 
@@ -408,18 +477,13 @@
       <div class="month" style="--n:${n}">
         <div class="mlabels" aria-hidden="true">${labels}</div>
         ${rows}
-        <div class="mrow daily">
-          <span class="mrow-head"><span class="mrow-name">Each day</span><span class="mrow-score">Share of habits done</span></span>
-          <span class="mbars">${bars}</span>
+        <div class="mrow daily" role="img" aria-label="Each day: ${m.perfect} of ${m.daily.filter((d) => d.due && d.key <= t).length} days with every habit done">
+          <span class="mrow-head" aria-hidden="true"><span class="mrow-name">Each day</span><span class="mrow-score">Share of habits done</span></span>
+          <span class="mbars" aria-hidden="true">${bars}</span>
         </div>
       </div>
 
-      <div class="legend">
-        <span><i style="background:var(--fg)"></i>Done</span>
-        <span><i style="background:var(--muted)"></i>Tiny</span>
-        <span><i style="box-shadow:inset 0 0 0 1.5px var(--muted)"></i>Shielded</span>
-        <span><i style="background:var(--line)"></i>Missed</span>
-      </div>`;
+      ${legend(true)}`;
   }
 
   function progressView(g) {
@@ -429,9 +493,10 @@
     const archived = state.habits.filter((h) => h.archived);
 
     return `
-      <div class="big-level"><b>${l.level}</b><span>${l.title}</span></div>
+      <h1 class="sr-only">Progress</h1>
+      <div class="big-level" aria-label="Level ${l.level}, ${l.title}"><b>${l.level}</b><span>${l.title}</span></div>
       <div class="level-row" style="margin-top:14px"><span>${l.xp} XP total</span><span>${l.needed - l.into} to level ${l.level + 1}</span></div>
-      <div class="bar"><i style="width:${Math.round((l.into / l.needed) * 100)}%"></i></div>
+      ${progressBar(Math.round((l.into / l.needed) * 100), `Progress to level ${l.level + 1}`)}
 
       <div class="stats">
         <div class="stat"><b>${s.checkins}</b><small>Check-ins</small></div>
@@ -440,7 +505,7 @@
         <div class="stat"><b>${earned}/${g.badges.length}</b><small>Badges</small></div>
       </div>
 
-      <div class="section-label">Badges</div>
+      <h2 class="section-label">Badges</h2>
       <div class="badges">${g.badges.map((b) => `
         <div class="badge${b.earned ? ' earned' : ''}">
           <span class="dot"></span>
@@ -448,7 +513,7 @@
         </div>`).join('')}
       </div>
 
-      <div class="section-label">How it works</div>
+      <h2 class="section-label">How it works</h2>
       <div class="rules">
         <p><b>The tiny version counts.</b> <span>On a bad day, do the two-minute version. Your streak stays alive.</span></p>
         <p><b>Shields.</b> <span>Every 7-day streak (4 weeks for weekly habits) earns a shield, up to 3. A shield absorbs one missed day automatically.</span></p>
@@ -457,10 +522,10 @@
         <p><b>Surprises.</b> <span>Some check-ins drop bonus XP. You won’t know which.</span></p>
       </div>
 
-      ${archived.length ? `<div class="section-label">Archived</div>
+      ${archived.length ? `<h2 class="section-label">Archived</h2>
         <div>${archived.map((h) => `<button class="row-btn" data-action="restore" data-id="${h.id}">${esc(h.name)}<span>Restore</span></button>`).join('')}</div>` : ''}
 
-      <div class="section-label">Data</div>
+      <h2 class="section-label">Data</h2>
       <div>
         <button class="row-btn" data-action="export">Export backup<span>JSON</span></button>
         <button class="row-btn" data-action="import">Restore from backup<span>Replaces data</span></button>
@@ -472,8 +537,10 @@
 
   function renderSheet() {
     if (!sheet) { sheetEl.hidden = true; sheetEl.innerHTML = ''; return; }
+    const keep = focusKey();
     sheetEl.hidden = false;
     sheetEl.innerHTML = `<div class="sheet-inner">${sheet.type === 'form' ? formView() : detailView()}</div>`;
+    refocus(sheetEl, keep);
   }
 
   function formView() {
@@ -490,25 +557,26 @@
     } else if (d.type === 'weekly') {
       schedule = `<div class="stepper">
         <button data-action="times" data-delta="-1" ${d.times <= 1 ? 'disabled' : ''} aria-label="Fewer">−</button>
-        <output>${plural(d.times, 'time')} a week</output>
+        <output aria-live="polite">${plural(d.times, 'time')} a week</output>
         <button data-action="times" data-delta="1" ${d.times >= 6 ? 'disabled' : ''} aria-label="More">+</button>
       </div>`;
     }
 
     return `
+      <h2 class="sr-only" id="sheet-title" tabindex="-1">${editing ? 'Edit habit' : 'New habit'}</h2>
       <div class="sheet-top">
         <button data-action="close">Cancel</button>
         <button class="done" data-action="save" ${draftValid(d) ? '' : 'disabled'}>${editing ? 'Save' : 'Add'}</button>
       </div>
-      <label class="field"><span>Habit</span>
-        <input type="text" data-field="name" value="${esc(d.name)}" placeholder="Read" maxlength="60" autocomplete="off"></label>
-      <label class="field"><span>Tiny version</span>
-        <input type="text" data-field="tiny" value="${esc(d.tiny)}" placeholder="Read one page" maxlength="60" autocomplete="off">
-        <p class="hint">What you can still do on your worst day. It keeps the streak alive.</p></label>
-      <label class="field"><span>When</span>
-        <input type="text" data-field="cue" value="${esc(d.cue)}" placeholder="After I pour my coffee" maxlength="80" autocomplete="off">
-        <p class="hint">Attach it to something you already do.</p></label>
-      <div class="field"><span>How often</span>
+      <div class="field"><label for="f-name">Habit</label>
+        <input type="text" id="f-name" data-field="name" value="${esc(d.name)}" placeholder="Read" maxlength="60" autocomplete="off"></div>
+      <div class="field"><label for="f-tiny">Tiny version</label>
+        <input type="text" id="f-tiny" data-field="tiny" value="${esc(d.tiny)}" placeholder="Read one page" maxlength="60" autocomplete="off" aria-describedby="h-tiny">
+        <p class="hint" id="h-tiny">What you can still do on your worst day. It keeps the streak alive.</p></div>
+      <div class="field"><label for="f-cue">When</label>
+        <input type="text" id="f-cue" data-field="cue" value="${esc(d.cue)}" placeholder="After I pour my coffee" maxlength="80" autocomplete="off" aria-describedby="h-cue">
+        <p class="hint" id="h-cue">Attach it to something you already do.</p></div>
+      <div class="field" role="group" aria-labelledby="g-often"><span id="g-often">How often</span>
         <div class="seg">${seg('daily', 'Daily')}${seg('days', 'Some days')}${seg('weekly', 'Weekly')}</div>
         ${schedule}
       </div>
@@ -520,11 +588,11 @@
       ? `<b>${j.count}</b> of ${j.goal} check-ins <span>${JOURNEY_TEXT[j.goal].to}</span>`
       : `<b>${j.count}</b> check-ins <span>more than a year of practice</span>`;
     const left = j.goal ? `${j.goal - j.count} to go` : 'Complete';
-    return `<div class="section-label">Journey</div>
+    return `<h2 class="section-label">Journey</h2>
       <div class="journey">
         <div class="journey-row"><span class="journey-text">${text}</span><span class="journey-left">${left}</span></div>
-        <div class="bar"><i style="width:${j.pct}%"></i></div>
-        <div class="journey-steps">${E.JOURNEY.map((g) =>
+        ${progressBar(j.pct, j.goal ? `Journey to ${j.goal} check-ins` : 'Journey')}
+        <div class="journey-steps" aria-hidden="true">${E.JOURNEY.map((g) =>
           `<span class="${j.count >= g ? 'reached' : ''}">${g}</span>`).join('')}</div>
       </div>`;
   }
@@ -543,9 +611,10 @@
       const d = E.addDays(t, -i);
       const ok = d >= h.createdAt && E.isScheduled(h, d);
       const v = ok ? log[d] || '' : '';
+      const status = !ok ? 'not scheduled' : v === 'full' ? 'done' : v === 'tiny' ? 'tiny version' : 'not done';
       week += `<div class="col${i === 0 ? ' today' : ''}">
-        <button class="check" data-action="edit-day" data-id="${h.id}" data-key="${d}" data-v="${v}" ${ok ? '' : 'disabled'} aria-label="${DAY_NAMES[E.weekday(d)]} ${d}">${TICK}</button>
-        <small>${DAY_LETTERS[E.weekday(d)]}</small>
+        <button class="check" data-action="edit-day" data-id="${h.id}" data-key="${d}" data-v="${v}" ${ok ? '' : 'disabled'} aria-label="${esc(longDate(d))}: ${status}">${TICK}</button>
+        <small aria-hidden="true">${DAY_LETTERS[E.weekday(d)]}</small>
       </div>`;
     }
 
@@ -555,11 +624,15 @@
     const weeks = E.diffDays(start, E.weekStart(t)) / 7 + 1;
     const since = new Date(`${start}T12:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
     let heat = '';
+    const cells = [];
     for (let d = start; d <= E.addDays(E.weekStart(t), 6); d = E.addDays(d, 1)) {
+      const daily = E.scheduleAt(h, d).type !== 'weekly';
       let cls = '';
       if (d > t || d < h.createdAt || !E.isScheduled(h, d)) cls = 'off';
       else if (log[d]) cls = log[d];
-      else if (r.statuses[d] === 'shielded' && E.scheduleAt(h, d).type !== 'weekly') cls = 'shielded';
+      else if (daily && r.statuses[d] === 'shielded') cls = 'shielded';
+      else if (daily && d < t) cls = 'missed';
+      cells.push(cls);
       heat += `<i class="${cls}"></i>`;
     }
 
@@ -568,7 +641,7 @@
         <button data-action="close" aria-label="Back">‹ Back</button>
         <button data-action="edit" data-id="${h.id}">Edit</button>
       </div>
-      <div class="detail-name">${esc(h.name)}</div>
+      <h1 class="detail-name" id="sheet-title" tabindex="-1">${esc(h.name)}</h1>
       <div class="detail-cue">${esc([h.cue, scheduleText(h.schedule)].filter(Boolean).join(' · '))}</div>
       ${h.tiny ? `<div class="detail-cue">Tiny version: ${esc(h.tiny)}</div>` : ''}
 
@@ -581,17 +654,13 @@
 
       ${journeyBlock(E.journey(r.fullCount + r.tinyCount))}
 
-      <div class="section-label">Last 7 days</div>
+      <h2 class="section-label">Last 7 days</h2>
       <div class="week-edit">${week}</div>
       <p class="hint">Tap to cycle: done, tiny, not done.</p>
 
-      <div class="section-label">${weeks >= HISTORY_WEEKS ? 'Past year' : `Since ${esc(since)}`}</div>
-      <div class="heat" style="--cols:${Math.max(20, weeks)}">${heat}</div>
-      <div class="legend">
-        <span><i style="background:var(--fg)"></i>Done</span>
-        <span><i style="background:var(--muted)"></i>Tiny</span>
-        <span><i style="box-shadow:inset 0 0 0 1.5px var(--muted)"></i>Shielded</span>
-      </div>
+      <h2 class="section-label">${weeks >= HISTORY_WEEKS ? 'Past year' : `Since ${esc(since)}`}</h2>
+      <div class="heat" style="--cols:${Math.max(20, weeks)}" role="img" aria-label="History: ${tally(cells)}">${heat}</div>
+      ${legend(true)}
 
       <div class="detail-actions">
         <button class="link" data-action="archive" data-id="${h.id}">Archive</button>
