@@ -1,5 +1,5 @@
 // Offline support: serve the app shell from cache, refresh it in the background.
-const CACHE = 'habito-v4';
+const CACHE = 'habito-v5';
 const FILES = [
   './',
   'index.html',
